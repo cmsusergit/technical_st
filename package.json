@@ -28,6 +28,10 @@
 	"type": "module",
 	"dependencies": {
 		"chart.js": "^4.5.0",
-		"chartjs-chart-financial": "^0.2.1"
+		"chartjs-chart-financial": "^0.2.1",
+		"chartjs-plugin-zoom": "^2.2.0",
+		"plotly.js-dist-min": "^3.0.1",
+		"talib.ts": "^0.0.17",
+		"technicalindicators": "^3.1.0"
 	}
 }
