@@ -39,6 +39,7 @@
   let showPrevDayHighLow = false;
   let renkoAtrPeriod = 14;
   const renkoAtrPeriodOptions = [7, 10, 14, 20, 50];
+  let showPattrnAnnotations = false; // Disabled by default
   async function fetchCryptoData(pair) {
     try {
       const curr1 = Date.now();
@@ -68,9 +69,9 @@
   async function fetchPrevDayHighLow(pair) {
     try {
       const now = Date.now();
-      const oneHour = 60 * 60 * 1000;
-      const twoDays = 2 * 24 * oneHour;
-      const fromDt = now - twoDays;
+      const oneHour = 60 *60 *1000;
+      const twoDays = 2 *24 *oneHour;
+      const fromDt = now -twoDays;
       const to = Math.floor(now / 1000);
       const from = Math.floor(fromDt / 1000);
       const url = `https://public.coindcx.com/market_data/candlesticks?pair=${pair}&from=${from}&to=${to}&resolution=60&pcode=f`;
@@ -175,6 +176,9 @@
     const resistance = Math.max(...prevCloses);
     const supportMargin = (support * supportResistanceMarginPct) / 100;
     const resistanceMargin = (resistance * supportResistanceMarginPct) / 100;
+    // Add vertical lines at the start and end of the support/resistance window
+    const xStart = x[prevWindowStart];
+    const xEnd = x[prevWindowEnd - 1];
     return [
       {
         type: 'rect',
@@ -199,8 +203,32 @@
         fillcolor: 'rgba(200,0,0,0.15)',
         line: { width: 0 },
         layer: 'below'
-      }
-    ];
+      },
+      // Vertical line at start of support/resistance window
+      xStart !== undefined ? {
+        type: 'line',
+        xref: 'x',
+        yref: 'paper',
+        x0: xStart,
+        x1: xStart,
+        y0: 0,
+        y1: 1,
+        line: { color: 'rgba(0,0,0,0.4)', width: 2, dash: 'dot' },
+        layer: 'above'
+      } : null,
+      // Vertical line at end of support/resistance window
+      xEnd !== undefined ? {
+        type: 'line',
+        xref: 'x',
+        yref: 'paper',
+        x0: xEnd,
+        x1: xEnd,
+        y0: 0,
+        y1: 1,
+        line: { color: 'rgba(0,0,0,0.4)', width: 2, dash: 'dot' },
+        layer: 'above'
+      } : null
+    ].filter(Boolean);
   }
 
   function getPrevDayHighLowTraces() {
@@ -514,6 +542,44 @@
     }
     return traces;
   }
+  function detectCandlePatrns(ohlc) {
+    const Pattrns = [];
+    const { open, high, low, close, x } = ohlc;
+    if (!open || !close || !high || !low) return Pattrns;
+    for (let i = 1; i < open.length; i++) {
+      // Doji
+      if (Math.abs(open[i] - close[i]) < (high[i] - low[i]) * 0.1) {
+        Pattrns.push({ x: x[i], y: high[i], text: 'Doji' });
+      }
+      // Hammer
+      if (
+        (close[i] > open[i]) &&
+        ((open[i] - low[i]) > 2 * Math.abs(close[i] - open[i])) &&
+        ((high[i] - close[i]) < Math.abs(close[i] - open[i]))
+      ) {
+        Pattrns.push({ x: x[i], y: low[i], text: 'Hammer' });
+      }
+      // Bullish Engulfing
+      if (
+        (close[i] > open[i]) &&
+        (close[i-1] < open[i-1]) &&
+        (open[i] < close[i-1]) &&
+        (close[i] > open[i-1])
+      ) {
+        Pattrns.push({ x: x[i], y: high[i], text: 'Bull Engulf' });
+      }
+      // Bearish Engulfing
+      if (
+        (close[i] < open[i]) &&
+        (close[i-1] > open[i-1]) &&
+        (open[i] > close[i-1]) &&
+        (close[i] < open[i-1])
+      ) {
+        Pattrns.push({ x: x[i], y: low[i], text: 'Bear Engulf' });
+      }
+    }
+    return Pattrns;
+  }
 
   function updatePlot() {
     if (plotlyLoaded && plotDiv) {
@@ -526,9 +592,27 @@
       const hasLowerPlot = selectedIndicators.some(ind => ['atr', 'rsi', 'macd'].includes(ind));
       const boxShapes = getSupportResistanceBoxShapes();
       const renkoShapes = getRenkoBricksShapes();
+      let PattrnAnnots = [];
+      if (showPattrnAnnotations) {
+        const ohlc = (plotType === 'heikinashi') ? getHeikinAshiData() : prices;
+        PattrnAnnots = detectCandlePatrns(ohlc).map(p => ({
+          x: p.x,
+          y: p.y,
+          xref: 'x',
+          yref: 'y1',
+          text: p.text,
+          showarrow: true,
+          arrowhead: 7,
+          ax: 0,
+          ay: p.text === 'Hammer' ? 40 : -40,
+          bgcolor: 'rgba(255,255,0,0.7)',
+          bordercolor: 'black',
+          font: { color: 'black', size: 10 }
+        }));
+      }
       let layout = {
         title: '',
-        grid: { rows: 2, columns: 1, pattern: 'independent', roworder: 'top to bottom' },
+        grid: { rows: 2, columns: 1, Pattrn: 'independent', roworder: 'top to bottom' },
         height: 800,
         margin: { t: 20, r: 50, l: 50, b: 90 },
         showlegend: true,
@@ -588,6 +672,7 @@
           showgrid: true
         },
         shapes: [...boxShapes, ...renkoShapes],
+        annotations: PattrnAnnots,
         hovermode: 'x unified',
         spikedistance: -1,
         xaxis_showspikes: true,
@@ -636,6 +721,9 @@
 
   // Reactively update plot when indicator or period changes
   $: if (plotlyLoaded && plotDiv) updatePlot();
+  $: if (showPattrnAnnotations && plotType === 'heikinashi') {
+    plotType = 'candlestick';
+  }
 </script>
 
 <div style="margin:0 auto;width:80%;">
@@ -728,6 +816,10 @@
     <label><input type="radio" name="plotType" value="heikinashi" bind:group={plotType} on:change={updatePlot}> Heikin Ashi</label>
     <label><input type="checkbox" bind:checked={showRenkoOverlay} on:change={updatePlot}> Show Renko Overlay</label>
     <label><input type="checkbox" bind:checked={showPrevDayHighLow} on:change={updatePlot}> Show Prev Day High/Low</label>
+    <label><input type="checkbox" bind:checked={showPattrnAnnotations} on:change={updatePlot}> Candle Pattrn</label>
+    {#if showPattrnAnnotations && plotType === 'heikinashi'}
+      <span style="color: red; font-size: 0.9em;">Pattrn detection only works with Candle plot</span>
+    {/if}
   </div>
   <div bind:this={plotDiv}></div>
   <div style="margin-top:1em;">

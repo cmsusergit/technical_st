@@ -12,7 +12,7 @@
 		<p><strong>Svelte Crypto Chart Pro</strong></p>
 
 	</footer>
-</div>
+</div> 
 
 
 
